@@ -9,6 +9,14 @@ help: ## Display this help
 
 
 ##@ Environment
+.PHONY: env
+env:
+	@echo "Setting up development environment with uv..."
+	@test -d .venv || uv venv
+	@uv pip install -e '.[test]'
+	@echo "✓ Development environment ready"
+	@echo "  Activate with: source .venv/bin/activate"
+
 .PHONY: clean
 clean: ## Clean up build artifacts
 	@echo "Cleaning up..."
