@@ -2,7 +2,7 @@
 
 CLI for fetching GitLab CI/CD variables and inject them into your local environment for running commands.
 
-Inspired `op`, Doppler, `pass`, etc.
+Inspired by `op`, Doppler, `pass`, etc.
 
 ## Use Cases
 
