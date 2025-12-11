@@ -16,8 +16,11 @@ jobs:
           - "3.12"
           - "3.13"
           - "3.14"
+
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Install uv and set the Python version
         uses: astral-sh/setup-uv@v7
@@ -25,5 +28,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
-      - run: make env
       - run: make lint

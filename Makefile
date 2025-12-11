@@ -33,7 +33,7 @@ clean: ## Clean up build artifacts
 
 ##@ Compiling
 .PHONY: build
-build: lint ## Build
+build: ## Build
 	@echo "Building..."
 	@uv build
 
