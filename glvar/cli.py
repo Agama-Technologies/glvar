@@ -29,7 +29,7 @@ from rich.prompt import Prompt
 # - Use .devN suffix during development - add after making a release
 # - Remove .devN for stable releases
 # - Increment MINOR for new features, MAJOR for breaking changes
-__version__ = "0.3"
+__version__ = "0.3+dev1"
 
 
 HELP_TEXT = """GitLab CI/CD variable reader.
@@ -37,32 +37,28 @@ HELP_TEXT = """GitLab CI/CD variable reader.
 glvar - Fetch Gitlab CI/CD variables and inject into environment for local commands.
 
 \b
-Usage:
-  glvar run -p GROUP/PROJECT MY_SECRET -- ./deploy.sh ...
-  glvar get -p GROUP/PROJECT VAR        # Get a variable
-\b
-  export GLVAR_PROJECT=mygroup/myproject
-  export SECRET=$(glvar get MY_SECRET)
-\b
-  glvar config setup                    # Interactive setup
-  glvar projects                        # List available projects
-  glvar list -p GROUP/PROJECT           # List variables
-
-\b
-Use cases:
 - Read API keys for development
 - Run a deploy that requires secrets/api keys from your computer
 - Extract a .env file with config options stored in a CI/CD variable
+
+\b
+Setup:
+  glvar config setup
+
+\b
+Usage:
+  glvar get -p GROUP/PROJECT VAR           # Get a variable
+  glvar run -p GROUP/PROJECT VAR -- ./cmd  # Run with variable in env
+  glvar list -p GROUP/PROJECT              # List variables
+  glvar projects                           # List available projects
+\b
+  export GLVAR_PROJECT=mygroup/myproject
+  export SECRET=$(glvar get MY_SECRET)
 
 Examples:
 
 IMPORTANT: The examples extract secrets from GitLab - be careful and use responsibly.
 Understand what it does before using and avoid saving secrets to files whenever possible.
-
-\b
-# Setup glvar - with guide to creating a token in GitLab:
-# (glvar store token in OS keyring)
-$ glvar config setup
 
 \b
 # Run deploy that requires secrets from Gitlab - without exposing to shell:
@@ -94,6 +90,17 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 console = Console(stderr=True)
 
 
+def check_keyring() -> tuple[bool, str | None]:
+    """Check if keyring is available and working. Returns (available, error_message)."""
+    try:
+        keyring.get_password(APP_NAME, "__test__")
+        return True, None
+    except keyring.errors.InitError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
+
+
 def load_config() -> dict | None:
     """Load configuration from file and optionally keyring."""
     if not CONFIG_FILE.exists():
@@ -108,16 +115,23 @@ def load_config() -> dict | None:
 
     # Get token based on storage setting (default: keyring)
     if config.get("use_keyring", True):
-        token = keyring.get_password(APP_NAME, "token")
-        if token:
-            config["token"] = token
+        try:
+            token = keyring.get_password(APP_NAME, "token")
+            if token:
+                config["token"] = token
+        except Exception:
+            console.print("[red]Failed to read token from keyring.[/red]")
+            console.print("[grey62]Run 'glvar config setup' to reconfigure.[/grey62]")
     # If use_keyring is False, token is already in config dict
 
     return config
 
 
-def save_config(gitlab_url: str, token: str, use_keyring: bool = True) -> None:
-    """Save configuration to file and token to keyring or config."""
+def save_config(gitlab_url: str, token: str, use_keyring: bool = True) -> bool:
+    """Save configuration to file and token to keyring or config.
+
+    Returns True if successful, False if keyring failed (token saved to config instead).
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     config = {
@@ -125,9 +139,16 @@ def save_config(gitlab_url: str, token: str, use_keyring: bool = True) -> None:
         "use_keyring": use_keyring,
     }
 
+    keyring_failed = False
     if token:
         if use_keyring:
-            keyring.set_password(APP_NAME, "token", token)
+            try:
+                keyring.set_password(APP_NAME, "token", token)
+            except Exception:
+                # Keyring failed, fall back to config file
+                config["token"] = token
+                config["use_keyring"] = False
+                keyring_failed = True
         else:
             config["token"] = token
 
@@ -136,6 +157,8 @@ def save_config(gitlab_url: str, token: str, use_keyring: bool = True) -> None:
 
     # Set secure permissions (owner read/write only)
     CONFIG_FILE.chmod(0o600)
+
+    return not keyring_failed
 
 
 def validate_config(gitlab_url: str, token: str) -> tuple[bool, str | None]:
@@ -370,29 +393,36 @@ def config_setup(url: str | None, token: str | None, no_keyring: bool):
     use_keyring = not no_keyring
     interactive = not url or not token
 
+    # Check keyring availability if user wants to use it
+    keyring_err_msg = None
+    if use_keyring:
+        keyring_ok, keyring_err = check_keyring()
+        if not keyring_ok:
+            use_keyring = False
+            keyring_err_msg = keyring_err
+
     if interactive:
         console.print("[bold]GitLab Variable Reader Setup[/bold]")
         console.print()
-        console.print(f"[dim]Config will be saved to: {CONFIG_FILE}[/dim]")
-        if not use_keyring:
-            console.print("[dim]Token will be stored in config file (--no-keyring)[/dim]")
+        if keyring_err_msg:
+            console.print("[yellow]Keyring not available - will store token in config file[/yellow]")
+            console.print(f"[grey62]{keyring_err_msg}[/grey62]")
+            console.print()
+        token_storage = "keyring" if use_keyring else "config file"
+        console.print(f"[grey62]Config: {CONFIG_FILE}[/grey62]")
+        console.print(f"[grey62]Token storage: {token_storage}[/grey62]")
         console.print()
 
     # Get URL
     if not url:
         url = Prompt.ask("GitLab URL", default="https://gitlab.com")
 
-    # Save URL (whether from arg or prompt)
-    save_config(url, "", use_keyring=use_keyring)
-    if interactive:
-        console.print("[dim]Saved URL to config[/dim]")
-
     # Get token
     if not token:
         token_url = f"{url.rstrip('/')}/-/user_settings/personal_access_tokens"
         console.print()
         console.print(f"Create a PAT at: [link={token_url}]{token_url}[/link]")
-        console.print("[dim]Required scope: read_api[/dim]")
+        console.print("[grey62]Required scope: read_api[/grey62]")
         console.print()
         token = Prompt.ask("Personal Access Token", password=True)
 
@@ -402,7 +432,7 @@ def config_setup(url: str | None, token: str | None, no_keyring: bool):
 
     # Validate
     console.print()
-    console.print("[dim]Validating...[/dim]")
+    console.print("[grey62]Validating...[/grey62]")
     valid, result = validate_config(url, token)
 
     if not valid:
@@ -410,17 +440,20 @@ def config_setup(url: str | None, token: str | None, no_keyring: bool):
         sys.exit(1)
 
     # Save
-    save_config(url, token, use_keyring=use_keyring)
+    keyring_ok = save_config(url, token, use_keyring=use_keyring)
 
     console.print()
     console.print(f"[green]✓ Authenticated as:[/green] {result}")
     console.print(f"[green]✓ Config saved to:[/green] {CONFIG_FILE}")
-    if use_keyring:
+    if use_keyring and keyring_ok:
         console.print("[green]✓ Token stored in:[/green] OS keyring")
     else:
-        console.print("[green]✓ Token stored in:[/green] config file")
+        if use_keyring and not keyring_ok:
+            console.print("[yellow]! Keyring save failed, token stored in config file[/yellow]")
+        else:
+            console.print("[green]✓ Token stored in:[/green] config file")
     console.print()
-    console.print("[dim]Example: export SECRET=$(glvar get -p group/project MY_SECRET)[/dim]")
+    console.print("[grey62]Example: export SECRET=$(glvar get -p group/project MY_SECRET)[/grey62]")
 
 
 @config.command("show")
@@ -432,25 +465,23 @@ def config_show():
         console.print("[yellow]Not configured. Run: glvar config setup[/yellow]")
         sys.exit(1)
 
-    console.print(f"[bold]Config file:[/bold] {CONFIG_FILE}")
-    console.print(f"[bold]GitLab URL:[/bold] {cfg.get('gitlab_url', 'not set')}")
-
     use_keyring = cfg.get("use_keyring", True)
-    console.print(f"[bold]Token storage:[/bold] {'keyring' if use_keyring else 'config file'}")
+    storage_location = "keyring" if use_keyring else "config file"
 
-    # Get token based on storage setting
+    console.print(f"[grey62]Config: {CONFIG_FILE}[/grey62]")
+    console.print(f"URL: {cfg.get('gitlab_url', '[yellow]not set[/yellow]')}")
+
     token = cfg.get("token")
     if token:
-        storage_location = "keyring" if use_keyring else "config file"
-        console.print(f"[bold]Token:[/bold] {'*' * 20} (hidden, from {storage_location})")
+        console.print(f"Token: {'*' * 20} [grey62]({storage_location})[/grey62]")
     else:
-        console.print("[bold]Token:[/bold] [yellow]not found[/yellow]")
+        console.print("Token: [yellow]not found[/yellow]")
         return
 
     valid, result = validate_config(cfg["gitlab_url"], token)
+    console.print()
     if valid:
-        console.print(f"[bold]User:[/bold] {result}")
-        console.print("[green]✓ Token is valid[/green]")
+        console.print(f"[green]✓ Authenticated as {result}[/green]")
     else:
         console.print(f"[red]✗ Token invalid: {result}[/red]")
 
@@ -483,7 +514,7 @@ def config_reset():
             pass
 
     if not removed:
-        console.print("[dim]Nothing to remove[/dim]")
+        console.print("[grey62]Nothing to remove[/grey62]")
 
 
 @cli.command()
@@ -501,7 +532,7 @@ def projects(ctx, limit: int):
         sys.exit(1)
 
     if not project_list:
-        console.print("[dim]No projects found[/dim]")
+        console.print("[grey62]No projects found[/grey62]")
         return
 
     # Sort by path
@@ -539,7 +570,7 @@ def list_cmd(ctx, project: str | None):
         sys.exit(1)
 
     if not variables:
-        console.print("[dim]No variables found[/dim]")
+        console.print("[grey62]No variables found[/grey62]")
         return
 
     for var in variables:
@@ -550,10 +581,10 @@ def list_cmd(ctx, project: str | None):
 
         flags = " ".join(filter(None, [protected, masked]))
         if flags:
-            flags = f" [dim]({flags})[/dim]"
+            flags = f" [grey62]({flags})[/grey62]"
 
         if scope != "*":
-            console.print(f"{key} [dim][{scope}][/dim]{flags}")
+            console.print(f"{key} [grey62][{scope}][/grey62]{flags}")
         else:
             console.print(f"{key}{flags}")
 

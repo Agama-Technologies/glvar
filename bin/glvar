@@ -1,0 +1,3 @@
+#!/bin/sh
+# Dev wrapper - runs glvar from .venv
+exec "$(dirname "$0")/../.venv/bin/glvar" "$@"
