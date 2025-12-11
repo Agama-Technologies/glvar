@@ -2,7 +2,10 @@
 name = "glvar"
 description = "Fetch variables from GitLab and inject into environment for local commands"
 readme = "README.md"
+authors = [{name = "Oskar Skoog", email = "oskar.skoog@agama.tv"}]
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+classifiers = []
 dependencies = [
     "requests<3",
     "rich",
@@ -10,6 +13,12 @@ dependencies = [
     "keyring",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/Agama-Technologies/glvar"
+Changelog = "https://github.com/Agama-Technologies/glvar/releases"
+Issues = "https://github.com/Agama-Technologies/glvar/issues"
+CI = "https://github.com/Agama-Technologies/glvar/actions"
 
 [project.optional-dependencies]
 test = [
