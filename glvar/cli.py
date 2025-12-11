@@ -95,7 +95,7 @@ console = Console(stderr=True)
 
 
 def load_config() -> dict | None:
-    """Load configuration from file and keyring."""
+    """Load configuration from file and optionally keyring."""
     if not CONFIG_FILE.exists():
         return None
 
@@ -106,32 +106,36 @@ def load_config() -> dict | None:
         console.print(f"[red]Error reading config: {e}[/red]")
         return None
 
-    # Get token from keyring
-    token = keyring.get_password(APP_NAME, "token")
-    if token:
-        config["token"] = token
+    # Get token based on storage setting (default: keyring)
+    if config.get("use_keyring", True):
+        token = keyring.get_password(APP_NAME, "token")
+        if token:
+            config["token"] = token
+    # If use_keyring is False, token is already in config dict
 
     return config
 
 
-def save_config(gitlab_url: str, token: str) -> None:
-    """Save configuration to file and token to keyring."""
+def save_config(gitlab_url: str, token: str, use_keyring: bool = True) -> None:
+    """Save configuration to file and token to keyring or config."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     config = {
         "gitlab_url": gitlab_url.rstrip("/"),
+        "use_keyring": use_keyring,
     }
 
-    # Write config (without token)
+    if token:
+        if use_keyring:
+            keyring.set_password(APP_NAME, "token", token)
+        else:
+            config["token"] = token
+
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
 
     # Set secure permissions (owner read/write only)
     CONFIG_FILE.chmod(0o600)
-
-    # Store token in keyring
-    if token:
-        keyring.set_password(APP_NAME, "token", token)
 
 
 def validate_config(gitlab_url: str, token: str) -> tuple[bool, str | None]:
@@ -185,9 +189,7 @@ def _fetch_variable(
         return None, f"Request failed: {e}"
 
 
-def get_variable(
-    gitlab_url: str, token: str, path: str, variable: str
-) -> str | None:
+def get_variable(gitlab_url: str, token: str, path: str, variable: str) -> str | None:
     """Fetch a CI/CD variable, checking project then group in parallel."""
 
     is_group = "/" not in path
@@ -232,9 +234,7 @@ def get_variable(
     return None
 
 
-def list_variables(
-    gitlab_url: str, token: str, path: str
-) -> list[dict] | None:
+def list_variables(gitlab_url: str, token: str, path: str) -> list[dict] | None:
     """List CI/CD variables for a project or group."""
     encoded = quote(path, safe="")
     is_group = "/" not in path
@@ -307,8 +307,6 @@ def list_projects(gitlab_url: str, token: str, limit: int = 100) -> list[dict] |
         return None
 
 
-
-
 # ============================================================================
 # CLI Commands
 # ============================================================================
@@ -325,7 +323,12 @@ def get_config(ctx) -> dict:
 
 @click.group(help=HELP_TEXT, invoke_without_command=True)
 @click.option("--url", envvar="GLVAR_URL", show_envvar=True, help="GitLab URL (overrides config)")
-@click.option("--token", envvar="GLVAR_TOKEN", show_envvar=True, help="Personal Access Token (overrides keyring)")
+@click.option(
+    "--token",
+    envvar="GLVAR_TOKEN",
+    show_envvar=True,
+    help="Personal Access Token (overrides keyring)",
+)
 @click.pass_context
 def cli(ctx, url: str | None, token: str | None):
     ctx.ensure_object(dict)
@@ -349,17 +352,30 @@ def config():
 
 
 @config.command("setup")
-@click.option("--url", envvar="GLVAR_URL", show_envvar=True, help="GitLab URL (e.g., https://gitlab.example.com)")
-@click.option("--token", envvar="GLVAR_TOKEN", show_envvar=True, help="Personal Access Token with read_api scope")
-def config_setup(url: str | None, token: str | None):
-    """Configure GitLab connection.
-    """
+@click.option(
+    "--url",
+    envvar="GLVAR_URL",
+    show_envvar=True,
+    help="GitLab URL (e.g., https://gitlab.example.com)",
+)
+@click.option(
+    "--token",
+    envvar="GLVAR_TOKEN",
+    show_envvar=True,
+    help="Personal Access Token with read_api scope",
+)
+@click.option("--no-keyring", is_flag=True, help="Store token in config file instead of OS keyring")
+def config_setup(url: str | None, token: str | None, no_keyring: bool):
+    """Configure GitLab connection."""
+    use_keyring = not no_keyring
     interactive = not url or not token
 
     if interactive:
         console.print("[bold]GitLab Variable Reader Setup[/bold]")
         console.print()
         console.print(f"[dim]Config will be saved to: {CONFIG_FILE}[/dim]")
+        if not use_keyring:
+            console.print("[dim]Token will be stored in config file (--no-keyring)[/dim]")
         console.print()
 
     # Get URL
@@ -367,7 +383,7 @@ def config_setup(url: str | None, token: str | None):
         url = Prompt.ask("GitLab URL", default="https://gitlab.com")
 
     # Save URL (whether from arg or prompt)
-    save_config(url, "")
+    save_config(url, "", use_keyring=use_keyring)
     if interactive:
         console.print("[dim]Saved URL to config[/dim]")
 
@@ -394,11 +410,15 @@ def config_setup(url: str | None, token: str | None):
         sys.exit(1)
 
     # Save
-    save_config(url, token)
+    save_config(url, token, use_keyring=use_keyring)
 
     console.print()
     console.print(f"[green]✓ Authenticated as:[/green] {result}")
     console.print(f"[green]✓ Config saved to:[/green] {CONFIG_FILE}")
+    if use_keyring:
+        console.print("[green]✓ Token stored in:[/green] OS keyring")
+    else:
+        console.print("[green]✓ Token stored in:[/green] config file")
     console.print()
     console.print("[dim]Example: export SECRET=$(glvar get -p group/project MY_SECRET)[/dim]")
 
@@ -415,13 +435,18 @@ def config_show():
     console.print(f"[bold]Config file:[/bold] {CONFIG_FILE}")
     console.print(f"[bold]GitLab URL:[/bold] {cfg.get('gitlab_url', 'not set')}")
 
-    # Check token in keyring (ignore env vars)
-    token = keyring.get_password(APP_NAME, "token")
+    use_keyring = cfg.get("use_keyring", True)
+    console.print(f"[bold]Token storage:[/bold] {'keyring' if use_keyring else 'config file'}")
+
+    # Get token based on storage setting
+    token = cfg.get("token")
     if token:
-        console.print(f"[bold]Token:[/bold] {'*' * 20} (hidden, from keyring)")
+        storage_location = "keyring" if use_keyring else "config file"
+        console.print(f"[bold]Token:[/bold] {'*' * 20} (hidden, from {storage_location})")
     else:
-        console.print("[bold]Token:[/bold] [yellow]not in keyring[/yellow]")
+        console.print("[bold]Token:[/bold] [yellow]not found[/yellow]")
         return
+
     valid, result = validate_config(cfg["gitlab_url"], token)
     if valid:
         console.print(f"[bold]User:[/bold] {result}")
@@ -435,17 +460,27 @@ def config_reset():
     """Remove configuration and token."""
     removed = False
 
+    # Check if we need to clean up keyring
+    use_keyring = True
     if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE) as f:
+                cfg = json.load(f)
+                use_keyring = cfg.get("use_keyring", True)
+        except (json.JSONDecodeError, IOError):
+            pass
+
         CONFIG_FILE.unlink()
         console.print(f"[green]✓ Removed {CONFIG_FILE}[/green]")
         removed = True
 
-    try:
-        keyring.delete_password(APP_NAME, "token")
-        console.print("[green]✓ Removed token from keyring[/green]")
-        removed = True
-    except keyring.errors.PasswordDeleteError:
-        pass
+    if use_keyring:
+        try:
+            keyring.delete_password(APP_NAME, "token")
+            console.print("[green]✓ Removed token from keyring[/green]")
+            removed = True
+        except keyring.errors.PasswordDeleteError:
+            pass
 
     if not removed:
         console.print("[dim]Nothing to remove[/dim]")
@@ -478,7 +513,9 @@ def projects(ctx, limit: int):
 
 
 @cli.command("list")
-@click.option("-p", "--project", envvar="GLVAR_PROJECT", show_envvar=True, help="Project/group path")
+@click.option(
+    "-p", "--project", envvar="GLVAR_PROJECT", show_envvar=True, help="Project/group path"
+)
 @click.pass_context
 def list_cmd(ctx, project: str | None):
     """List CI/CD variables for a project or group.
@@ -522,9 +559,18 @@ def list_cmd(ctx, project: str | None):
 
 
 @cli.command()
-@click.option("-p", "--project", envvar="GLVAR_PROJECT", show_envvar=True, help="Project/group path")
+@click.option(
+    "-p", "--project", envvar="GLVAR_PROJECT", show_envvar=True, help="Project/group path"
+)
 @click.option("-a", "--all", "fetch_all", is_flag=True, help="Get all variables")
-@click.option("-f", "--format", "fmt", type=click.Choice(["value", "env"]), default="value", help="Output format")
+@click.option(
+    "-f",
+    "--format",
+    "fmt",
+    type=click.Choice(["value", "env"]),
+    default="value",
+    help="Output format",
+)
 @click.argument("variables", nargs=-1)
 @click.pass_context
 def get(ctx, project: str | None, fetch_all: bool, fmt: str, variables: tuple[str, ...]):
@@ -580,7 +626,9 @@ def get(ctx, project: str | None, fetch_all: bool, fmt: str, variables: tuple[st
 
 
 @cli.command()
-@click.option("-p", "--project", envvar="GLVAR_PROJECT", show_envvar=True, help="Project/group path")
+@click.option(
+    "-p", "--project", envvar="GLVAR_PROJECT", show_envvar=True, help="Project/group path"
+)
 @click.option("-a", "--all", "fetch_all", is_flag=True, help="Use all variables")
 @click.argument("variables", nargs=-1)
 @click.pass_context
@@ -638,6 +686,6 @@ _doubledash_command = None
 if __name__ == "__main__":
     if "--" in sys.argv:
         sep_idx = sys.argv.index("--")
-        _doubledash_command = sys.argv[sep_idx + 1:]
+        _doubledash_command = sys.argv[sep_idx + 1 :]
         sys.argv = sys.argv[:sep_idx]
     cli()

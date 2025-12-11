@@ -49,6 +49,9 @@ glvar projects
 # Interactive setup - guides you through creating a GitLab PAT
 glvar config setup
 
+# Store token in config file instead of keyring
+glvar config setup --no-keyring
+
 # Show current configuration
 glvar config show
 
@@ -110,11 +113,16 @@ When fetching from a project path (e.g., `mygroup/myproject`), glvar checks both
 1. Project-level variables (takes precedence)
 2. Group-level variables
 
+
 ## Development
 
 ```bash
 # Install dependencies
 uv sync
+
+# Show make targets
+make
+make help
 
 # Run linting
 make lint
