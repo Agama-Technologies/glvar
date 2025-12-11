@@ -38,9 +38,7 @@ jobs:
     needs:
       - build
 
-    environment:
-      name: pypi
-      url: https://pypi.org/p/glvar
+    environment: pypi
 
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
@@ -51,5 +49,6 @@ jobs:
         with:
           name: python-package-distributions
           path: dist/
-      #- name: Publish distribution to PyPI
-      #  uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
