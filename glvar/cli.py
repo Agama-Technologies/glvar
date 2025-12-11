@@ -29,7 +29,7 @@ from rich.prompt import Prompt
 # - Use .devN suffix during development - add after making a release
 # - Remove .devN for stable releases
 # - Increment MINOR for new features, MAJOR for breaking changes
-__version__ = "0.1"
+__version__ = "0.2"
 
 
 HELP_TEXT = """GitLab CI/CD variable reader.
