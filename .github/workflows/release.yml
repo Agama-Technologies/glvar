@@ -38,7 +38,9 @@ jobs:
     needs:
       - build
 
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/p/glvar
 
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
