@@ -345,6 +345,7 @@ def get_config(ctx) -> dict:
 
 
 @click.group(help=HELP_TEXT, invoke_without_command=True)
+@click.version_option(version=__version__, prog_name="glvar")
 @click.option("--url", envvar="GLVAR_URL", show_envvar=True, help="GitLab URL (overrides config)")
 @click.option(
     "--token",
