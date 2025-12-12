@@ -1,5 +1,7 @@
 # glvar
 
+[![PyPI](https://img.shields.io/pypi/v/glvar)](https://pypi.org/project/glvar/)
+
 CLI for fetching GitLab CI/CD variables and inject them into your local environment for running commands.
 
 Inspired by `op`, Doppler, `pass`, etc.
