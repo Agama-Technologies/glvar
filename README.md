@@ -147,4 +147,7 @@ make clean
 
 ## License
 
+Copyright (c) 2025 [Agama Technologies AB](https://agama.tv/)
+
 See LICENSE file for details.
+
