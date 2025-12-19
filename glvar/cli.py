@@ -715,9 +715,16 @@ def run(ctx, project: str | None, fetch_all: bool, variables: tuple[str, ...]):
 
 _doubledash_command = None
 
-if __name__ == "__main__":
+
+def main():
+    """Entry point that handles -- separator for the run command."""
+    global _doubledash_command
     if "--" in sys.argv:
         sep_idx = sys.argv.index("--")
         _doubledash_command = sys.argv[sep_idx + 1 :]
         sys.argv = sys.argv[:sep_idx]
     cli()
+
+
+if __name__ == "__main__":
+    main()

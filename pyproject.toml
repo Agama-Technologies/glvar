@@ -26,7 +26,7 @@ test = [
 ]
 
 [project.scripts]
-glvar = "glvar.cli:cli"
+glvar = "glvar.cli:main"
 
 [build-system]
 requires = ["setuptools >= 77"]
